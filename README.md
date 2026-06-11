@@ -12,10 +12,12 @@ Json files that contain the sentences should be placed at `backend/data/json/{ta
     },
     {
         "sentenceId": "sample1_sentence2",
-        "sentence": "This is sample sentence 2 from sample1.json."
+        "sentence": "She is helping the boy {b}bear{/b} his shoes."
     }
 ]
 ```
+
+Sentences may contain `{b}word{/b}` tags to bold the error word. The UI renders these as bold text.
 
 Users can access the web app at `{frontend_url}/task/{task_id}` (e.g., http://localhost:5173/task/sample1), where they can record the audio sentence by sentence, check the audio, and submit the audio of their choosing.
 

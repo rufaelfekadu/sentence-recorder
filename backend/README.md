@@ -23,6 +23,20 @@ The code is written with [Python](https://www.python.org/) + [FastAPI](https://f
 
     The app runs on [http://localhost:8000](http://localhost:8000) by default.
 
+## Validation access
+
+The validation UI is protected by a static token. Set it via environment variable before starting the backend:
+
+```
+VALIDATION_TOKEN=your-secret-token uv run main.py
+```
+
+Alternatively, add a `validationToken` field to `app/config.json`.
+
+Open the frontend validation page at [http://localhost:5173/validation](http://localhost:5173/validation), enter the token once, and the browser stores it in `localStorage` for subsequent requests.
+
+Validation review decisions are saved to `data/reviews/{task_id}.json`.
+
 - For linting, run:
 
     ```
