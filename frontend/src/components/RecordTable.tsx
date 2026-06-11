@@ -5,6 +5,7 @@ import IconButton from "@mui/material/IconButton";
 import MicIcon from "@mui/icons-material/Mic";
 import StopIcon from "@mui/icons-material/Stop";
 import { useReactMediaRecorder } from "../utils/ReactMediaRecorder";
+import FormattedSentence from "./FormattedSentence";
 import { SentenceEntity } from "./types";
 import "./RecordTable.css";
 
@@ -95,7 +96,9 @@ const RecordTableRow: React.FC<{
 
   return (
     <tr className="fs-4">
-      <td>{sentenceEntity.sentence}</td>
+      <td>
+        <FormattedSentence sentence={sentenceEntity.sentence} />
+      </td>
       <td>
         <StartStopButton
           status={status}

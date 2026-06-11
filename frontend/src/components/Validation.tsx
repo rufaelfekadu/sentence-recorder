@@ -12,6 +12,7 @@ import {
   getValidationToken,
   setValidationToken,
 } from "../utils/authFetch";
+import FormattedSentence from "./FormattedSentence";
 import {
   ReviewStatus,
   ReviewUpdate,
@@ -343,7 +344,9 @@ const Validation = () => {
             <tbody>
               {sentences.map((sentence) => (
                 <tr key={sentence.sentenceId}>
-                  <td>{sentence.sentence}</td>
+                  <td>
+                    <FormattedSentence sentence={sentence.sentence} />
+                  </td>
                   <td>
                     {sentence.hasAudio && sentence.audioUrl ? (
                       <AuthAudio audioUrl={sentence.audioUrl} />
