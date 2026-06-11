@@ -83,7 +83,7 @@ const RecordTableRow: React.FC<{
     useReactMediaRecorder({ audio: true });
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [isChecked, setIsChecked] = useState<boolean>(
-    !!sentenceEntity.isSelected,
+    !!sentenceEntity.willSubmit,
   );
 
   useEffect(() => {
@@ -114,6 +114,7 @@ const RecordTableRow: React.FC<{
       <td>
         <RecordCheckbox
           isChecked={isChecked}
+          label={`Submit`}
           onChange={(checked) => {
             setIsChecked(checked);
             onSelectionChange(sentenceEntity.sentenceId, audioUrl, checked);
@@ -127,7 +128,7 @@ const RecordTableRow: React.FC<{
 const RecordTableHeader: React.FC = () => (
   <thead>
     <tr className="fw-bold fs-5">
-      <td>Sentences to record</td>
+      <td>Phrases to record</td>
       <td>Record / Stop</td>
       <td>Check the audio</td>
       <td>Submit the audio</td>

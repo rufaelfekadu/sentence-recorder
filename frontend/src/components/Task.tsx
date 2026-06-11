@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router";
 import Container from "react-bootstrap/Container";
 import Button from "react-bootstrap/Button";
@@ -29,7 +29,7 @@ const Task = () => {
         const sentences: SentenceEntity[] = await response.json();
         setSentences(sentences);
       } catch (error) {
-        setError(error.message);
+        setError((error as Error).message ?? "Unknown error");
       }
     };
     fetchSentences();
