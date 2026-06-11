@@ -1,5 +1,6 @@
 import React from "react";
 
+const BOLD_ENABLED = false;
 const BOLD_TAG = /\{b\}(.*?)\{\/b\}/g;
 
 interface FormattedSentenceProps {
@@ -21,9 +22,13 @@ export default function FormattedSentence({ sentence }: FormattedSentenceProps) 
       parts.push(sentence.slice(lastIndex, match.index));
     }
     parts.push(
-      <strong key={match.index} className="fw-bold">
-        {match[1]}
-      </strong>,
+      BOLD_ENABLED ? (
+        <strong key={match.index} className="fw-bold">
+          {match[1]}
+        </strong>
+      ) : (
+        match[1]
+      ),
     );
     lastIndex = BOLD_TAG.lastIndex;
   }
