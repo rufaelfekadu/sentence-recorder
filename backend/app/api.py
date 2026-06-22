@@ -155,15 +155,45 @@ async def read_root() -> dict:
     return {"message": "connected to backend"}
 
 
+def enrich_with_submission_status(task_id: str, assignments: list) -> list:
+    task_id = sanitize_id(task_id, "task_id")
+    audio_dir = AUDIO_DIR / task_id
+    enriched = []
+    for entry in assignments:
+        if not isinstance(entry, dict) or "sentenceId" not in entry:
+            enriched.append(entry)
+            continue
+        sentence_id = entry["sentenceId"]
+        audio_file = audio_dir / f"{sentence_id}{AUDIO_EXT}"
+        has_submitted = (
+            audio_file.is_file() and audio_file.stat().st_size >= MIN_AUDIO_BYTES
+        )
+        enriched.append(
+            {
+                **entry,
+                "hasSubmitted": has_submitted,
+                "submittedAudioUrl": (
+                    f"/recordings/{task_id}/{sentence_id}" if has_submitted else None
+                ),
+            }
+        )
+    return enriched
+
+
 @app.get("/read-json/{task_id}")
 def read_json(task_id: str):
-    json_dir = Path("data/json")
+    task_id = sanitize_id(task_id, "task_id")
+    json_file = JSON_DIR / f"{task_id}.json"
     try:
-        json_file = json_dir / f"{task_id}.json"
-        with open(json_file, "r", encoding="utf-8") as f:
+        with json_file.open(encoding="utf-8") as f:
             content = json.load(f)
 
-        return JSONResponse(content)
+        if not isinstance(content, list):
+            raise HTTPException(
+                status_code=400, detail=f"Invalid JSON format: {task_id}.json."
+            )
+
+        return JSONResponse(enrich_with_submission_status(task_id, content))
 
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -194,6 +224,16 @@ async def submit_recordings(recordings: list[Recording], task_id: str):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Submission failed: {str(e)}")
+
+
+@app.get("/recordings/{task_id}/{sentence_id}")
+def get_recording_audio(task_id: str, sentence_id: str):
+    task_id = sanitize_id(task_id, "task_id")
+    sentence_id = sanitize_id(sentence_id, "sentence_id")
+    audio_file = AUDIO_DIR / task_id / f"{sentence_id}{AUDIO_EXT}"
+    if not audio_file.is_file():
+        raise HTTPException(status_code=404, detail="Audio file not found.")
+    return FileResponse(audio_file, media_type="audio/webm")
 
 
 class ReviewUpdate(BaseModel):
