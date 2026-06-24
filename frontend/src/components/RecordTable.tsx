@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import Table from "react-bootstrap/Table";
 import Form from "react-bootstrap/Form";
 import Badge from "react-bootstrap/Badge";
@@ -7,7 +7,7 @@ import MicIcon from "@mui/icons-material/Mic";
 import StopIcon from "@mui/icons-material/Stop";
 import { useReactMediaRecorder } from "../utils/ReactMediaRecorder";
 import FormattedSentence from "./FormattedSentence";
-import { SentenceEntity } from "./types";
+import { PendingSelection, SentenceEntity } from "./types";
 import config from "../config.json";
 import "./RecordTable.css";
 
@@ -68,6 +68,7 @@ const RecordCheckbox: React.FC<{
 
 const RecordTableRow: React.FC<{
   sentenceEntity: SentenceEntity;
+  initialSelection?: PendingSelection;
   isRecordingElsewhere: boolean;
   setIsRecordingElsewhere: React.Dispatch<React.SetStateAction<boolean>>;
   onSelectionChange: (
@@ -77,15 +78,18 @@ const RecordTableRow: React.FC<{
   ) => void;
 }> = ({
   sentenceEntity,
+  initialSelection,
   isRecordingElsewhere,
   setIsRecordingElsewhere,
   onSelectionChange,
 }) => {
   const { status, startRecording, stopRecording, mediaBlobUrl } =
     useReactMediaRecorder({ audio: true });
-  const [localAudioUrl, setLocalAudioUrl] = useState<string | null>(null);
+  const [localAudioUrl, setLocalAudioUrl] = useState<string | null>(
+    initialSelection?.audioUrl ?? null,
+  );
   const [serverAudioUrl, setServerAudioUrl] = useState<string | null>(null);
-  const [isChecked, setIsChecked] = useState(false);
+  const [isChecked, setIsChecked] = useState(initialSelection?.isChecked ?? false);
   const prevHasSubmitted = useRef(!!sentenceEntity.hasSubmitted);
 
   useEffect(() => {
@@ -202,14 +206,25 @@ const RecordTableHeader: React.FC = () => (
 
 const RecordTableBody: React.FC<{
   sentences: SentenceEntity[];
+  pendingSelections: Map<string, PendingSelection>;
   onSelectionChange: (
     id: string,
     audioUrl: string | null,
     isChecked: boolean,
   ) => void;
-}> = ({ sentences, onSelectionChange }) => {
+  onRecordingActiveChange: (isActive: boolean) => void;
+}> = ({
+  sentences,
+  pendingSelections,
+  onSelectionChange,
+  onRecordingActiveChange,
+}) => {
   const [isRecordingElsewhere, setIsRecordingElsewhere] =
     useState<boolean>(false);
+
+  useEffect(() => {
+    onRecordingActiveChange(isRecordingElsewhere);
+  }, [isRecordingElsewhere, onRecordingActiveChange]);
 
   return (
     <tbody>
@@ -217,6 +232,7 @@ const RecordTableBody: React.FC<{
         <RecordTableRow
           key={sentenceEntity.sentenceId}
           sentenceEntity={sentenceEntity}
+          initialSelection={pendingSelections.get(sentenceEntity.sentenceId)}
           isRecordingElsewhere={isRecordingElsewhere}
           setIsRecordingElsewhere={setIsRecordingElsewhere}
           onSelectionChange={onSelectionChange}
@@ -230,31 +246,21 @@ const RecordTable: React.FC<{
   sentences: SentenceEntity[];
   submittedCount: number;
   totalCount: number;
-  onSelectionUpdate: (data: { sentenceId: string; audioUrl: string }[]) => void;
-}> = ({ sentences, submittedCount, totalCount, onSelectionUpdate }) => {
-  const [recordedData, setRecordedData] = useState<
-    { sentenceId: string; audioUrl: string; isChecked: boolean }[]
-  >([]);
-
-  const handleSelectionChange = useCallback(
-    (id: string, audioUrl: string | null, isChecked: boolean) => {
-      setRecordedData((prev) => {
-        if (!audioUrl) {
-          return prev.filter((item) => item.sentenceId !== id);
-        }
-        return [
-          ...prev.filter((item) => item.sentenceId !== id),
-          { sentenceId: id, audioUrl, isChecked },
-        ];
-      });
-    },
-    [],
-  );
-
-  useEffect(() => {
-    onSelectionUpdate(recordedData.filter((data) => data.isChecked));
-  }, [recordedData, onSelectionUpdate]);
-
+  pendingSelections: Map<string, PendingSelection>;
+  onSelectionChange: (
+    id: string,
+    audioUrl: string | null,
+    isChecked: boolean,
+  ) => void;
+  onRecordingActiveChange: (isActive: boolean) => void;
+}> = ({
+  sentences,
+  submittedCount,
+  totalCount,
+  pendingSelections,
+  onSelectionChange,
+  onRecordingActiveChange,
+}) => {
   return (
     <>
       <p className="fs-5 fw-bold mb-3">
@@ -264,7 +270,9 @@ const RecordTable: React.FC<{
         <RecordTableHeader />
         <RecordTableBody
           sentences={sentences}
-          onSelectionChange={handleSelectionChange}
+          pendingSelections={pendingSelections}
+          onSelectionChange={onSelectionChange}
+          onRecordingActiveChange={onRecordingActiveChange}
         />
       </Table>
     </>

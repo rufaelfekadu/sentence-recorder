@@ -180,8 +180,26 @@ def enrich_with_submission_status(task_id: str, assignments: list) -> list:
     return enriched
 
 
+def count_submitted(task_id: str, assignments: list) -> int:
+    task_id = sanitize_id(task_id, "task_id")
+    audio_dir = AUDIO_DIR / task_id
+    submitted = 0
+    for entry in assignments:
+        if not isinstance(entry, dict) or "sentenceId" not in entry:
+            continue
+        audio_file = audio_dir / f"{entry['sentenceId']}{AUDIO_EXT}"
+        if audio_file.is_file() and audio_file.stat().st_size >= MIN_AUDIO_BYTES:
+            submitted += 1
+    return submitted
+
+
 @app.get("/read-json/{task_id}")
-def read_json(task_id: str):
+def read_json(task_id: str, page: int = 1, page_size: int = 111):
+    if page < 1:
+        raise HTTPException(status_code=400, detail="page must be >= 1")
+    if page_size < 1 or page_size > 200:
+        raise HTTPException(status_code=400, detail="page_size must be between 1 and 200")
+
     task_id = sanitize_id(task_id, "task_id")
     json_file = JSON_DIR / f"{task_id}.json"
     try:
@@ -193,7 +211,22 @@ def read_json(task_id: str):
                 status_code=400, detail=f"Invalid JSON format: {task_id}.json."
             )
 
-        return JSONResponse(enrich_with_submission_status(task_id, content))
+        total = len(content)
+        submitted_count = count_submitted(task_id, content)
+        start = (page - 1) * page_size
+        page_content = content[start : start + page_size]
+        sentences = enrich_with_submission_status(task_id, page_content)
+
+        return JSONResponse(
+            {
+                "taskId": task_id,
+                "sentences": sentences,
+                "total": total,
+                "submittedCount": submitted_count,
+                "page": page,
+                "pageSize": page_size,
+            }
+        )
 
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -270,11 +303,11 @@ def list_validation_tasks():
 
 
 @app.get("/validation/tasks/{task_id}", dependencies=[Depends(require_token)])
-def get_validation_task(task_id: str, page: int = 1, page_size: int = 25):
+def get_validation_task(task_id: str, page: int = 1, page_size: int = 111):
     if page < 1:
         raise HTTPException(status_code=400, detail="page must be >= 1")
-    if page_size < 1 or page_size > 100:
-        raise HTTPException(status_code=400, detail="page_size must be between 1 and 100")
+    if page_size < 1 or page_size > 200:
+        raise HTTPException(status_code=400, detail="page_size must be between 1 and 200")
 
     task_id = sanitize_id(task_id, "task_id")
     json_path = JSON_DIR / f"{task_id}.json"

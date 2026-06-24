@@ -3,13 +3,20 @@ import { useParams, Link } from "react-router";
 import Container from "react-bootstrap/Container";
 import Button from "react-bootstrap/Button";
 import Alert from "react-bootstrap/Alert";
+import Pagination from "react-bootstrap/Pagination";
 import TaskDescription from "./TaskDescription";
 import RecordTable from "./RecordTable";
-import { SentenceEntity } from "./types";
+import { PendingSelection, SentenceEntity, TaskDetail } from "./types";
+import { getVisiblePages, PAGE_SIZE } from "../utils/pagination";
 import config from "../config.json";
 
-const fetchSentences = async (taskId: string): Promise<SentenceEntity[]> => {
-  const response = await fetch(`${config.backendUrl}/read-json/${taskId}`);
+const fetchTaskPage = async (
+  taskId: string,
+  page: number,
+): Promise<TaskDetail> => {
+  const response = await fetch(
+    `${config.backendUrl}/read-json/${taskId}?page=${page}&page_size=${PAGE_SIZE}`,
+  );
   if (!response.ok) {
     throw new Error(`Error: ${response.statusText}`);
   }
@@ -19,33 +26,70 @@ const fetchSentences = async (taskId: string): Promise<SentenceEntity[]> => {
 const Task = () => {
   const { taskId } = useParams<{ taskId: string }>();
   const [sentences, setSentences] = useState<SentenceEntity[] | null>(null);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [submittedCount, setSubmittedCount] = useState(0);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [agreed, setAgreed] = useState(false);
-  const [selectedRecordings, setSelectedRecordings] = useState<
-    { sentenceId: string; audioUrl: string }[]
-  >([]);
+  const [pendingSelections, setPendingSelections] = useState<
+    Map<string, PendingSelection>
+  >(() => new Map());
+  const [isRecordingActive, setIsRecordingActive] = useState(false);
   const [submitMessage, setSubmitMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const loadSentences = useCallback(async () => {
-    if (!taskId) return;
-    try {
-      const data = await fetchSentences(taskId);
-      setSentences(data);
-      setError(null);
-    } catch (err) {
-      setError((err as Error).message ?? "Unknown error");
-    }
-  }, [taskId]);
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const allSubmitted = total > 0 && submittedCount === total;
+
+  const loadSentences = useCallback(
+    async (pageNumber = 1) => {
+      if (!taskId) return;
+
+      setLoading(true);
+      try {
+        const data = await fetchTaskPage(taskId, pageNumber);
+        setSentences(data.sentences ?? []);
+        setPage(data.page ?? pageNumber);
+        setTotal(data.total ?? 0);
+        setSubmittedCount(data.submittedCount ?? 0);
+        setError(null);
+      } catch (err) {
+        setError((err as Error).message ?? "Unknown error");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [taskId],
+  );
 
   useEffect(() => {
-    loadSentences();
+    setPage(1);
+    setPendingSelections(new Map());
+    loadSentences(1);
   }, [loadSentences]);
 
-  const submittedCount =
-    sentences?.filter((s) => s.hasSubmitted).length ?? 0;
-  const totalCount = sentences?.length ?? 0;
-  const allSubmitted = totalCount > 0 && submittedCount === totalCount;
+  const handleSelectionChange = useCallback(
+    (id: string, audioUrl: string | null, isChecked: boolean) => {
+      setPendingSelections((prev) => {
+        const next = new Map(prev);
+        if (!audioUrl) {
+          next.delete(id);
+          return next;
+        }
+        next.set(id, { audioUrl, isChecked });
+        return next;
+      });
+    },
+    [],
+  );
+
+  const handlePageChange = (newPage: number) => {
+    if (!taskId || newPage < 1 || newPage > totalPages || newPage === page) {
+      return;
+    }
+    loadSentences(newPage);
+  };
 
   const handleSubmit = async () => {
     if (!agreed) {
@@ -53,7 +97,11 @@ const Task = () => {
       return;
     }
 
-    if (selectedRecordings.length === 0) {
+    const checkedEntries = [...pendingSelections.entries()].filter(
+      ([, selection]) => selection.isChecked,
+    );
+
+    if (checkedEntries.length === 0) {
       alert("Please select at least one recording before submitting.");
       return;
     }
@@ -62,8 +110,8 @@ const Task = () => {
     setSubmitMessage(null);
 
     const formattedData = await Promise.all(
-      selectedRecordings.map(async (data) => {
-        const response = await fetch(data.audioUrl);
+      checkedEntries.map(async ([sentenceId, selection]) => {
+        const response = await fetch(selection.audioUrl);
         const blob = await response.blob();
         const reader = new FileReader();
 
@@ -74,7 +122,7 @@ const Task = () => {
         });
 
         return {
-          sentenceId: data.sentenceId,
+          sentenceId,
           audioUrl: base64String,
         };
       }),
@@ -94,9 +142,9 @@ const Task = () => {
         throw new Error(`Failed to submit: ${response.statusText}`);
       }
 
-      const count = selectedRecordings.length;
-      setSelectedRecordings([]);
-      await loadSentences();
+      const count = checkedEntries.length;
+      setPendingSelections(new Map());
+      await loadSentences(page);
       setSubmitMessage(
         `${count} recording${count === 1 ? "" : "s"} uploaded successfully.`,
       );
@@ -107,6 +155,11 @@ const Task = () => {
       setIsSubmitting(false);
     }
   };
+
+  const paginationDisabled = loading || isSubmitting || isRecordingActive;
+  const checkedCount = [...pendingSelections.values()].filter(
+    (selection) => selection.isChecked,
+  ).length;
 
   if (error) {
     return <div>Error: {error}</div>;
@@ -143,17 +196,54 @@ const Task = () => {
         <RecordTable
           sentences={sentences}
           submittedCount={submittedCount}
-          totalCount={totalCount}
-          onSelectionUpdate={setSelectedRecordings}
+          totalCount={total}
+          pendingSelections={pendingSelections}
+          onSelectionChange={handleSelectionChange}
+          onRecordingActiveChange={setIsRecordingActive}
         />
+
+        {totalPages > 1 && (
+          <div className="d-flex justify-content-between align-items-center mt-3">
+            <span className="text-muted">
+              Page {page} of {totalPages} ({total} sentences)
+            </span>
+            <Pagination className="mb-0">
+              <Pagination.Prev
+                disabled={page <= 1 || paginationDisabled}
+                onClick={() => handlePageChange(page - 1)}
+              />
+              {getVisiblePages(page, totalPages).map((item, index) =>
+                item === "ellipsis" ? (
+                  <Pagination.Ellipsis key={`ellipsis-${index}`} disabled />
+                ) : (
+                  <Pagination.Item
+                    key={item}
+                    active={item === page}
+                    disabled={paginationDisabled}
+                    onClick={() => handlePageChange(item)}
+                  >
+                    {item}
+                  </Pagination.Item>
+                ),
+              )}
+              <Pagination.Next
+                disabled={page >= totalPages || paginationDisabled}
+                onClick={() => handlePageChange(page + 1)}
+              />
+            </Pagination>
+          </div>
+        )}
+
         <Button
           type="submit"
           variant="outline-primary"
           onClick={handleSubmit}
-          disabled={isSubmitting}
+          disabled={isSubmitting || checkedCount === 0}
           className="fs-4 fw-bold my-4"
         >
-          {isSubmitting ? "Submitting..." : "Submit All Checked Recordings"}
+          {isSubmitting
+            ? "Submitting..."
+            : `Submit All Checked Recordings${checkedCount > 0 ? ` (${checkedCount})` : ""}`}
         </Button>
       </Container>
     </div>
