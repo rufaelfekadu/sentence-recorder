@@ -31,3 +31,11 @@ export interface ReviewUpdate {
   status: ReviewStatus;
   note?: string | null;
 }
+
+export interface ValidationTaskDetail {
+  taskId: string;
+  sentences: ValidationSentence[];
+  total: number;
+  page: number;
+  pageSize: number;
+}

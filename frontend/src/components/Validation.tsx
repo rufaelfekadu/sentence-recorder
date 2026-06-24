@@ -5,6 +5,7 @@ import Form from "react-bootstrap/Form";
 import Table from "react-bootstrap/Table";
 import Alert from "react-bootstrap/Alert";
 import Badge from "react-bootstrap/Badge";
+import Pagination from "react-bootstrap/Pagination";
 import {
   authFetch,
   AuthError,
@@ -18,7 +19,36 @@ import {
   ReviewUpdate,
   TaskSummary,
   ValidationSentence,
+  ValidationTaskDetail,
 } from "./validationTypes";
+
+const PAGE_SIZE = 25;
+
+const getVisiblePages = (
+  current: number,
+  total: number,
+): (number | "ellipsis")[] => {
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, index) => index + 1);
+  }
+
+  const pages = new Set<number>([1, total, current - 1, current, current + 1]);
+  const visible = [...pages].filter((pageNum) => pageNum >= 1 && pageNum <= total).sort(
+    (a, b) => a - b,
+  );
+
+  const result: (number | "ellipsis")[] = [];
+  for (let index = 0; index < visible.length; index += 1) {
+    const pageNum = visible[index];
+    const previous = visible[index - 1];
+    if (index > 0 && pageNum - previous > 1) {
+      result.push("ellipsis");
+    }
+    result.push(pageNum);
+  }
+
+  return result;
+};
 
 const AuthAudio: React.FC<{ audioUrl: string }> = ({ audioUrl }) => {
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
@@ -82,8 +112,29 @@ const Validation = () => {
   const [tasks, setTasks] = useState<TaskSummary[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [sentences, setSentences] = useState<ValidationSentence[]>([]);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [reviewChanges, setReviewChanges] = useState<Map<string, ReviewUpdate>>(
+    () => new Map(),
+  );
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [pageError, setPageError] = useState<string | null>(null);
+
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  const mergeReviewChanges = (
+    loadedSentences: ValidationSentence[],
+    changes: Map<string, ReviewUpdate>,
+  ) =>
+    loadedSentences.map((sentence) => {
+      const change = changes.get(sentence.sentenceId);
+      if (!change) return sentence;
+      return {
+        ...sentence,
+        status: change.status,
+        note: change.note ?? sentence.note,
+      };
+    });
 
   const handleUnauthorized = useCallback(() => {
     clearValidationToken();
@@ -91,6 +142,9 @@ const Validation = () => {
     setSelectedTaskId(null);
     setTasks([]);
     setSentences([]);
+    setPage(1);
+    setTotal(0);
+    setReviewChanges(new Map());
     setAuthError("Invalid validation token. Please try again.");
   }, []);
 
@@ -116,18 +170,26 @@ const Validation = () => {
   }, [handleUnauthorized]);
 
   const loadTaskDetail = useCallback(
-    async (taskId: string) => {
+    async (
+      taskId: string,
+      pageNumber = 1,
+      changes: Map<string, ReviewUpdate> = reviewChanges,
+    ) => {
       setLoading(true);
       setPageError(null);
       setSaveMessage(null);
       try {
-        const response = await authFetch(`/validation/tasks/${taskId}`);
+        const response = await authFetch(
+          `/validation/tasks/${taskId}?page=${pageNumber}&page_size=${PAGE_SIZE}`,
+        );
         if (!response.ok) {
           throw new Error(`Failed to load task (${response.status})`);
         }
-        const data = await response.json();
+        const data: ValidationTaskDetail = await response.json();
         setSelectedTaskId(taskId);
-        setSentences(data.sentences ?? []);
+        setPage(data.page ?? pageNumber);
+        setTotal(data.total ?? 0);
+        setSentences(mergeReviewChanges(data.sentences ?? [], changes));
       } catch (err) {
         if (err instanceof AuthError) {
           handleUnauthorized();
@@ -138,7 +200,7 @@ const Validation = () => {
         setLoading(false);
       }
     },
-    [handleUnauthorized],
+    [reviewChanges, handleUnauthorized],
   );
 
   useEffect(() => {
@@ -179,6 +241,9 @@ const Validation = () => {
     setSelectedTaskId(null);
     setTasks([]);
     setSentences([]);
+    setPage(1);
+    setTotal(0);
+    setReviewChanges(new Map());
     setSaveMessage(null);
     setPageError(null);
   };
@@ -189,17 +254,23 @@ const Validation = () => {
         sentence.sentenceId === sentenceId ? { ...sentence, status } : sentence,
       ),
     );
+    setReviewChanges((prev) => {
+      const next = new Map(prev);
+      const existing = next.get(sentenceId);
+      next.set(sentenceId, {
+        sentenceId,
+        status,
+        note: existing?.note ?? null,
+      });
+      return next;
+    });
     setSaveMessage(null);
   };
 
   const handleSaveReviews = async () => {
-    if (!selectedTaskId) return;
+    if (!selectedTaskId || reviewChanges.size === 0) return;
 
-    const updates: ReviewUpdate[] = sentences.map((sentence) => ({
-      sentenceId: sentence.sentenceId,
-      status: sentence.status,
-      note: sentence.note,
-    }));
+    const updates = Array.from(reviewChanges.values());
 
     setLoading(true);
     setPageError(null);
@@ -213,8 +284,9 @@ const Validation = () => {
         throw new Error(`Failed to save reviews (${response.status})`);
       }
       setSaveMessage("Reviews saved.");
+      setReviewChanges(new Map());
       await loadTasks();
-      await loadTaskDetail(selectedTaskId);
+      await loadTaskDetail(selectedTaskId, page, new Map());
     } catch (err) {
       if (err instanceof AuthError) {
         handleUnauthorized();
@@ -224,6 +296,13 @@ const Validation = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handlePageChange = (newPage: number) => {
+    if (!selectedTaskId || newPage < 1 || newPage > totalPages || newPage === page) {
+      return;
+    }
+    loadTaskDetail(selectedTaskId, newPage);
   };
 
   if (!token) {
@@ -298,7 +377,11 @@ const Validation = () => {
                       <Button
                         size="sm"
                         variant="outline-primary"
-                        onClick={() => loadTaskDetail(task.taskId)}
+                        onClick={() => {
+                          setReviewChanges(new Map());
+                          setPage(1);
+                          loadTaskDetail(task.taskId, 1, new Map());
+                        }}
                         disabled={!task.hasSubmissions}
                       >
                         Review
@@ -320,6 +403,9 @@ const Validation = () => {
                 onClick={() => {
                   setSelectedTaskId(null);
                   setSentences([]);
+                  setPage(1);
+                  setTotal(0);
+                  setReviewChanges(new Map());
                   setSaveMessage(null);
                 }}
               >
@@ -327,8 +413,13 @@ const Validation = () => {
               </Button>
               <span className="h4 mb-0">Task: {selectedTaskId}</span>
             </div>
-            <Button variant="primary" onClick={handleSaveReviews} disabled={loading}>
+            <Button
+              variant="primary"
+              onClick={handleSaveReviews}
+              disabled={loading || reviewChanges.size === 0}
+            >
               Save reviews
+              {reviewChanges.size > 0 ? ` (${reviewChanges.size} unsaved)` : ""}
             </Button>
           </div>
 
@@ -384,6 +475,36 @@ const Validation = () => {
               ))}
             </tbody>
           </Table>
+
+          <div className="d-flex justify-content-between align-items-center mt-3">
+            <span className="text-muted">
+              Page {page} of {totalPages} ({total} sentences)
+            </span>
+            <Pagination className="mb-0">
+              <Pagination.Prev
+                disabled={page <= 1 || loading}
+                onClick={() => handlePageChange(page - 1)}
+              />
+              {getVisiblePages(page, totalPages).map((item, index) =>
+                item === "ellipsis" ? (
+                  <Pagination.Ellipsis key={`ellipsis-${index}`} disabled />
+                ) : (
+                  <Pagination.Item
+                    key={item}
+                    active={item === page}
+                    disabled={loading}
+                    onClick={() => handlePageChange(item)}
+                  >
+                    {item}
+                  </Pagination.Item>
+                ),
+              )}
+              <Pagination.Next
+                disabled={page >= totalPages || loading}
+                onClick={() => handlePageChange(page + 1)}
+              />
+            </Pagination>
+          </div>
         </>
       )}
     </Container>

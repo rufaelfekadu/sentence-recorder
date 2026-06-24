@@ -270,7 +270,12 @@ def list_validation_tasks():
 
 
 @app.get("/validation/tasks/{task_id}", dependencies=[Depends(require_token)])
-def get_validation_task(task_id: str):
+def get_validation_task(task_id: str, page: int = 1, page_size: int = 25):
+    if page < 1:
+        raise HTTPException(status_code=400, detail="page must be >= 1")
+    if page_size < 1 or page_size > 100:
+        raise HTTPException(status_code=400, detail="page_size must be between 1 and 100")
+
     task_id = sanitize_id(task_id, "task_id")
     json_path = JSON_DIR / f"{task_id}.json"
     if not json_path.is_file():
@@ -279,11 +284,15 @@ def get_validation_task(task_id: str):
     with json_path.open(encoding="utf-8") as f:
         assignments = json.load(f)
 
+    total = len(assignments)
+    start = (page - 1) * page_size
+    page_assignments = assignments[start : start + page_size]
+
     audio_dir = AUDIO_DIR / task_id
     reviews = load_reviews(task_id)
     sentences = []
 
-    for entry in assignments:
+    for entry in page_assignments:
         sentence_id = entry["sentenceId"]
         audio_file = audio_dir / f"{sentence_id}{AUDIO_EXT}"
         has_audio = audio_file.is_file()
@@ -308,7 +317,13 @@ def get_validation_task(task_id: str):
             }
         )
 
-    return {"taskId": task_id, "sentences": sentences}
+    return {
+        "taskId": task_id,
+        "sentences": sentences,
+        "total": total,
+        "page": page,
+        "pageSize": page_size,
+    }
 
 
 @app.get(
