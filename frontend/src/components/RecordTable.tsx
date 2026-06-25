@@ -7,6 +7,7 @@ import MicIcon from "@mui/icons-material/Mic";
 import StopIcon from "@mui/icons-material/Stop";
 import { useReactMediaRecorder } from "../utils/ReactMediaRecorder";
 import FormattedSentence from "./FormattedSentence";
+import UnsubmittedFilter from "./UnsubmittedFilter";
 import { PendingSelection, SentenceEntity } from "./types";
 import config from "../config.json";
 import "./RecordTable.css";
@@ -253,6 +254,9 @@ const RecordTable: React.FC<{
     isChecked: boolean,
   ) => void;
   onRecordingActiveChange: (isActive: boolean) => void;
+  unsubmittedOnly: boolean;
+  onUnsubmittedOnlyChange: (checked: boolean) => void;
+  filterDisabled?: boolean;
 }> = ({
   sentences,
   submittedCount,
@@ -260,21 +264,37 @@ const RecordTable: React.FC<{
   pendingSelections,
   onSelectionChange,
   onRecordingActiveChange,
+  unsubmittedOnly,
+  onUnsubmittedOnlyChange,
+  filterDisabled = false,
 }) => {
   return (
     <>
-      <p className="fs-5 fw-bold mb-3">
-        {submittedCount} / {totalCount} submitted
-      </p>
-      <Table hover>
-        <RecordTableHeader />
-        <RecordTableBody
-          sentences={sentences}
-          pendingSelections={pendingSelections}
-          onSelectionChange={onSelectionChange}
-          onRecordingActiveChange={onRecordingActiveChange}
+      <div className="d-flex justify-content-between align-items-center mb-3">
+        <p className="fs-5 fw-bold mb-0">
+          {submittedCount} / {totalCount} submitted
+        </p>
+        <UnsubmittedFilter
+          checked={unsubmittedOnly}
+          onChange={onUnsubmittedOnlyChange}
+          disabled={filterDisabled}
         />
-      </Table>
+      </div>
+      {unsubmittedOnly && sentences.length === 0 ? (
+        <p className="text-muted fs-5">
+          All recordings submitted — nothing left to record.
+        </p>
+      ) : (
+        <Table hover>
+          <RecordTableHeader />
+          <RecordTableBody
+            sentences={sentences}
+            pendingSelections={pendingSelections}
+            onSelectionChange={onSelectionChange}
+            onRecordingActiveChange={onRecordingActiveChange}
+          />
+        </Table>
+      )}
     </>
   );
 };

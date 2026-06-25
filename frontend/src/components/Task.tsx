@@ -13,9 +13,17 @@ import config from "../config.json";
 const fetchTaskPage = async (
   taskId: string,
   page: number,
+  unsubmittedOnly: boolean,
 ): Promise<TaskDetail> => {
+  const params = new URLSearchParams({
+    page: String(page),
+    page_size: String(PAGE_SIZE),
+  });
+  if (unsubmittedOnly) {
+    params.set("unsubmitted_only", "true");
+  }
   const response = await fetch(
-    `${config.backendUrl}/read-json/${taskId}?page=${page}&page_size=${PAGE_SIZE}`,
+    `${config.backendUrl}/read-json/${taskId}?${params.toString()}`,
   );
   if (!response.ok) {
     throw new Error(`Error: ${response.statusText}`);
@@ -28,10 +36,12 @@ const Task = () => {
   const [sentences, setSentences] = useState<SentenceEntity[] | null>(null);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
+  const [assignedTotal, setAssignedTotal] = useState(0);
   const [submittedCount, setSubmittedCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [agreed, setAgreed] = useState(false);
+  const [unsubmittedOnly, setUnsubmittedOnly] = useState(false);
   const [pendingSelections, setPendingSelections] = useState<
     Map<string, PendingSelection>
   >(() => new Map());
@@ -40,7 +50,8 @@ const Task = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const allSubmitted = total > 0 && submittedCount === total;
+  const allSubmitted =
+    assignedTotal > 0 && submittedCount === assignedTotal;
 
   const loadSentences = useCallback(
     async (pageNumber = 1) => {
@@ -48,10 +59,11 @@ const Task = () => {
 
       setLoading(true);
       try {
-        const data = await fetchTaskPage(taskId, pageNumber);
+        const data = await fetchTaskPage(taskId, pageNumber, unsubmittedOnly);
         setSentences(data.sentences ?? []);
         setPage(data.page ?? pageNumber);
         setTotal(data.total ?? 0);
+        setAssignedTotal(data.assignedTotal ?? data.total ?? 0);
         setSubmittedCount(data.submittedCount ?? 0);
         setError(null);
       } catch (err) {
@@ -60,7 +72,7 @@ const Task = () => {
         setLoading(false);
       }
     },
-    [taskId],
+    [taskId, unsubmittedOnly],
   );
 
   useEffect(() => {
@@ -68,6 +80,11 @@ const Task = () => {
     setPendingSelections(new Map());
     loadSentences(1);
   }, [loadSentences]);
+
+  const handleUnsubmittedOnlyChange = (checked: boolean) => {
+    setUnsubmittedOnly(checked);
+    setPage(1);
+  };
 
   const handleSelectionChange = useCallback(
     (id: string, audioUrl: string | null, isChecked: boolean) => {
@@ -196,16 +213,22 @@ const Task = () => {
         <RecordTable
           sentences={sentences}
           submittedCount={submittedCount}
-          totalCount={total}
+          totalCount={assignedTotal}
           pendingSelections={pendingSelections}
           onSelectionChange={handleSelectionChange}
           onRecordingActiveChange={setIsRecordingActive}
+          unsubmittedOnly={unsubmittedOnly}
+          onUnsubmittedOnlyChange={handleUnsubmittedOnlyChange}
+          filterDisabled={paginationDisabled}
         />
 
-        {totalPages > 1 && (
+        {(totalPages > 1 || unsubmittedOnly) && (
           <div className="d-flex justify-content-between align-items-center mt-3">
             <span className="text-muted">
-              Page {page} of {totalPages} ({total} sentences)
+              Page {page} of {totalPages}
+              {unsubmittedOnly
+                ? ` (${total} unsubmitted)`
+                : ` (${total} sentences)`}
             </span>
             <Pagination className="mb-0">
               <Pagination.Prev

@@ -155,19 +155,31 @@ async def read_root() -> dict:
     return {"message": "connected to backend"}
 
 
+def has_valid_submission(task_id: str, sentence_id: str) -> bool:
+    task_id = sanitize_id(task_id, "task_id")
+    audio_file = AUDIO_DIR / task_id / f"{sentence_id}{AUDIO_EXT}"
+    return audio_file.is_file() and audio_file.stat().st_size >= MIN_AUDIO_BYTES
+
+
+def filter_unsubmitted(task_id: str, assignments: list) -> list:
+    return [
+        entry
+        for entry in assignments
+        if isinstance(entry, dict)
+        and "sentenceId" in entry
+        and not has_valid_submission(task_id, entry["sentenceId"])
+    ]
+
+
 def enrich_with_submission_status(task_id: str, assignments: list) -> list:
     task_id = sanitize_id(task_id, "task_id")
-    audio_dir = AUDIO_DIR / task_id
     enriched = []
     for entry in assignments:
         if not isinstance(entry, dict) or "sentenceId" not in entry:
             enriched.append(entry)
             continue
         sentence_id = entry["sentenceId"]
-        audio_file = audio_dir / f"{sentence_id}{AUDIO_EXT}"
-        has_submitted = (
-            audio_file.is_file() and audio_file.stat().st_size >= MIN_AUDIO_BYTES
-        )
+        has_submitted = has_valid_submission(task_id, sentence_id)
         enriched.append(
             {
                 **entry,
@@ -181,20 +193,22 @@ def enrich_with_submission_status(task_id: str, assignments: list) -> list:
 
 
 def count_submitted(task_id: str, assignments: list) -> int:
-    task_id = sanitize_id(task_id, "task_id")
-    audio_dir = AUDIO_DIR / task_id
     submitted = 0
     for entry in assignments:
         if not isinstance(entry, dict) or "sentenceId" not in entry:
             continue
-        audio_file = audio_dir / f"{entry['sentenceId']}{AUDIO_EXT}"
-        if audio_file.is_file() and audio_file.stat().st_size >= MIN_AUDIO_BYTES:
+        if has_valid_submission(task_id, entry["sentenceId"]):
             submitted += 1
     return submitted
 
 
 @app.get("/read-json/{task_id}")
-def read_json(task_id: str, page: int = 1, page_size: int = 111):
+def read_json(
+    task_id: str,
+    page: int = 1,
+    page_size: int = 111,
+    unsubmitted_only: bool = False,
+):
     if page < 1:
         raise HTTPException(status_code=400, detail="page must be >= 1")
     if page_size < 1 or page_size > 200:
@@ -211,10 +225,14 @@ def read_json(task_id: str, page: int = 1, page_size: int = 111):
                 status_code=400, detail=f"Invalid JSON format: {task_id}.json."
             )
 
-        total = len(content)
         submitted_count = count_submitted(task_id, content)
+        filtered_content = (
+            filter_unsubmitted(task_id, content) if unsubmitted_only else content
+        )
+        assigned_total = len(content)
+        total = len(filtered_content)
         start = (page - 1) * page_size
-        page_content = content[start : start + page_size]
+        page_content = filtered_content[start : start + page_size]
         sentences = enrich_with_submission_status(task_id, page_content)
 
         return JSONResponse(
@@ -222,6 +240,7 @@ def read_json(task_id: str, page: int = 1, page_size: int = 111):
                 "taskId": task_id,
                 "sentences": sentences,
                 "total": total,
+                "assignedTotal": assigned_total,
                 "submittedCount": submitted_count,
                 "page": page,
                 "pageSize": page_size,
@@ -303,7 +322,12 @@ def list_validation_tasks():
 
 
 @app.get("/validation/tasks/{task_id}", dependencies=[Depends(require_token)])
-def get_validation_task(task_id: str, page: int = 1, page_size: int = 111):
+def get_validation_task(
+    task_id: str,
+    page: int = 1,
+    page_size: int = 111,
+    unsubmitted_only: bool = False,
+):
     if page < 1:
         raise HTTPException(status_code=400, detail="page must be >= 1")
     if page_size < 1 or page_size > 200:
@@ -317,9 +341,12 @@ def get_validation_task(task_id: str, page: int = 1, page_size: int = 111):
     with json_path.open(encoding="utf-8") as f:
         assignments = json.load(f)
 
-    total = len(assignments)
+    filtered_assignments = (
+        filter_unsubmitted(task_id, assignments) if unsubmitted_only else assignments
+    )
+    total = len(filtered_assignments)
     start = (page - 1) * page_size
-    page_assignments = assignments[start : start + page_size]
+    page_assignments = filtered_assignments[start : start + page_size]
 
     audio_dir = AUDIO_DIR / task_id
     reviews = load_reviews(task_id)

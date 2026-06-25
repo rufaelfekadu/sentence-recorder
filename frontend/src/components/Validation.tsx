@@ -14,6 +14,7 @@ import {
   setValidationToken,
 } from "../utils/authFetch";
 import FormattedSentence from "./FormattedSentence";
+import UnsubmittedFilter from "./UnsubmittedFilter";
 import {
   ReviewStatus,
   ReviewUpdate,
@@ -92,8 +93,12 @@ const Validation = () => {
   );
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [pageError, setPageError] = useState<string | null>(null);
+  const [unsubmittedOnly, setUnsubmittedOnly] = useState(false);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const visibleTasks = unsubmittedOnly
+    ? tasks.filter((task) => task.missing + task.empty > 0)
+    : tasks;
 
   const mergeReviewChanges = (
     loadedSentences: ValidationSentence[],
@@ -147,13 +152,21 @@ const Validation = () => {
       taskId: string,
       pageNumber = 1,
       changes: Map<string, ReviewUpdate> = reviewChanges,
+      filterUnsubmitted = unsubmittedOnly,
     ) => {
       setLoading(true);
       setPageError(null);
       setSaveMessage(null);
       try {
+        const params = new URLSearchParams({
+          page: String(pageNumber),
+          page_size: String(PAGE_SIZE),
+        });
+        if (filterUnsubmitted) {
+          params.set("unsubmitted_only", "true");
+        }
         const response = await authFetch(
-          `/validation/tasks/${taskId}?page=${pageNumber}&page_size=${PAGE_SIZE}`,
+          `/validation/tasks/${taskId}?${params.toString()}`,
         );
         if (!response.ok) {
           throw new Error(`Failed to load task (${response.status})`);
@@ -173,7 +186,7 @@ const Validation = () => {
         setLoading(false);
       }
     },
-    [reviewChanges, handleUnauthorized],
+    [reviewChanges, handleUnauthorized, unsubmittedOnly],
   );
 
   useEffect(() => {
@@ -278,6 +291,13 @@ const Validation = () => {
     loadTaskDetail(selectedTaskId, newPage);
   };
 
+  const handleDetailUnsubmittedOnlyChange = (checked: boolean) => {
+    setUnsubmittedOnly(checked);
+    if (!selectedTaskId) return;
+    setPage(1);
+    loadTaskDetail(selectedTaskId, 1, reviewChanges, checked);
+  };
+
   if (!token) {
     return (
       <Container className="my-5" style={{ maxWidth: "480px" }}>
@@ -319,11 +339,20 @@ const Validation = () => {
 
       {!selectedTaskId ? (
         <>
-          <h2 className="h4 mb-3">Submitted tasks</h2>
+          <div className="d-flex justify-content-between align-items-center mb-3">
+            <h2 className="h4 mb-0">Submitted tasks</h2>
+            <UnsubmittedFilter
+              checked={unsubmittedOnly}
+              onChange={setUnsubmittedOnly}
+              disabled={loading}
+            />
+          </div>
           {loading && tasks.length === 0 ? (
             <p>Loading tasks...</p>
           ) : tasks.length === 0 ? (
             <p>No tasks found.</p>
+          ) : visibleTasks.length === 0 ? (
+            <p className="text-muted">No tasks with unsubmitted recordings.</p>
           ) : (
             <Table hover responsive>
               <thead>
@@ -338,7 +367,7 @@ const Validation = () => {
                 </tr>
               </thead>
               <tbody>
-                {tasks.map((task) => (
+                {visibleTasks.map((task) => (
                   <tr key={task.taskId}>
                     <td>{task.taskId}</td>
                     <td>{task.assigned}</td>
@@ -352,8 +381,9 @@ const Validation = () => {
                         variant="outline-primary"
                         onClick={() => {
                           setReviewChanges(new Map());
+                          setUnsubmittedOnly(false);
                           setPage(1);
-                          loadTaskDetail(task.taskId, 1, new Map());
+                          loadTaskDetail(task.taskId, 1, new Map(), false);
                         }}
                         disabled={!task.hasSubmissions}
                       >
@@ -386,72 +416,90 @@ const Validation = () => {
               </Button>
               <span className="h4 mb-0">Task: {selectedTaskId}</span>
             </div>
-            <Button
-              variant="primary"
-              onClick={handleSaveReviews}
-              disabled={loading || reviewChanges.size === 0}
-            >
-              Save reviews
-              {reviewChanges.size > 0 ? ` (${reviewChanges.size} unsaved)` : ""}
-            </Button>
+            <div className="d-flex align-items-center gap-3">
+              <UnsubmittedFilter
+                checked={unsubmittedOnly}
+                onChange={handleDetailUnsubmittedOnlyChange}
+                disabled={loading}
+              />
+              <Button
+                variant="primary"
+                onClick={handleSaveReviews}
+                disabled={loading || reviewChanges.size === 0}
+              >
+                Save reviews
+                {reviewChanges.size > 0 ? ` (${reviewChanges.size} unsaved)` : ""}
+              </Button>
+            </div>
           </div>
 
-          <Table hover responsive>
-            <thead>
-              <tr>
-                <th>Sentence</th>
-                <th>Audio</th>
-                <th>Status</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sentences.map((sentence) => (
-                <tr key={sentence.sentenceId}>
-                  <td>
-                    <FormattedSentence sentence={sentence.sentence} />
-                  </td>
-                  <td>
-                    {sentence.hasAudio && sentence.audioUrl ? (
-                      <AuthAudio audioUrl={sentence.audioUrl} />
-                    ) : (
-                      <span className="text-muted">No audio</span>
-                    )}
-                  </td>
-                  <td>
-                    <Badge bg={statusVariant(sentence.status)}>{sentence.status}</Badge>
-                  </td>
-                  <td>
-                    <Button
-                      size="sm"
-                      variant={
-                        sentence.status === "valid" ? "success" : "outline-success"
-                      }
-                      className="me-2"
-                      onClick={() => updateSentenceStatus(sentence.sentenceId, "valid")}
-                    >
-                      Valid
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant={
-                        sentence.status === "invalid" ? "danger" : "outline-danger"
-                      }
-                      onClick={() =>
-                        updateSentenceStatus(sentence.sentenceId, "invalid")
-                      }
-                    >
-                      Invalid
-                    </Button>
-                  </td>
+          {unsubmittedOnly && sentences.length === 0 ? (
+            <p className="text-muted">No unsubmitted recordings in this task.</p>
+          ) : (
+            <Table hover responsive>
+              <thead>
+                <tr>
+                  <th>Sentence</th>
+                  <th>Audio</th>
+                  <th>Status</th>
+                  <th>Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </Table>
+              </thead>
+              <tbody>
+                {sentences.map((sentence) => (
+                  <tr key={sentence.sentenceId}>
+                    <td>
+                      <FormattedSentence sentence={sentence.sentence} />
+                    </td>
+                    <td>
+                      {sentence.hasAudio && sentence.audioUrl ? (
+                        <AuthAudio audioUrl={sentence.audioUrl} />
+                      ) : (
+                        <span className="text-muted">No audio</span>
+                      )}
+                    </td>
+                    <td>
+                      <Badge bg={statusVariant(sentence.status)}>
+                        {sentence.status}
+                      </Badge>
+                    </td>
+                    <td>
+                      <Button
+                        size="sm"
+                        variant={
+                          sentence.status === "valid" ? "success" : "outline-success"
+                        }
+                        className="me-2"
+                        onClick={() =>
+                          updateSentenceStatus(sentence.sentenceId, "valid")
+                        }
+                      >
+                        Valid
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant={
+                          sentence.status === "invalid" ? "danger" : "outline-danger"
+                        }
+                        onClick={() =>
+                          updateSentenceStatus(sentence.sentenceId, "invalid")
+                        }
+                      >
+                        Invalid
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          )}
 
           <div className="d-flex justify-content-between align-items-center mt-3">
             <span className="text-muted">
-              Page {page} of {totalPages} ({total} sentences)
+              Page {page} of {totalPages}
+              {unsubmittedOnly
+                ? ` (${total} unsubmitted)`
+                : ` (${total} sentences)`}
             </span>
             <Pagination className="mb-0">
               <Pagination.Prev

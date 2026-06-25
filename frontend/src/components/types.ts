@@ -14,6 +14,7 @@ export interface TaskDetail {
   taskId: string;
   sentences: SentenceEntity[];
   total: number;
+  assignedTotal: number;
   submittedCount: number;
   page: number;
   pageSize: number;
