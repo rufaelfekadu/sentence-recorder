@@ -31,6 +31,7 @@ RATING_SCHEMA_PATH = DATA_DIR / "rating_schema.json"
 AUDIO_EXT = ".webm"
 MIN_AUDIO_BYTES = 1024
 SAFE_ID_PATTERN = re.compile(r"^[a-zA-Z0-9._-]+$")
+BOLD_MARKER_PATTERN = re.compile(r"\{b\}.*?\{/b\}")
 
 app.add_middleware(
     CORSMiddleware,
@@ -548,6 +549,53 @@ def validate_rating_fields(fields: dict, schema: dict) -> dict:
     return validated
 
 
+def has_bold_marker(sentence: str) -> bool:
+    return bool(BOLD_MARKER_PATTERN.search(sentence))
+
+
+def filter_rateable_assignments(assignments: list) -> list:
+    return [
+        entry
+        for entry in assignments
+        if isinstance(entry, dict)
+        and "sentenceId" in entry
+        and not has_bold_marker(entry.get("sentence", ""))
+    ]
+
+
+def summarize_rateable(task_id: str, assignments: list) -> dict:
+    task_id = sanitize_id(task_id, "task_id")
+    audio_dir = AUDIO_DIR / task_id
+    missing = 0
+    empty = 0
+    valid = 0
+    assigned = 0
+
+    for entry in assignments:
+        if not isinstance(entry, dict) or "sentenceId" not in entry:
+            continue
+        assigned += 1
+        sentence_id = entry["sentenceId"]
+        audio_file = audio_dir / f"{sentence_id}{AUDIO_EXT}"
+        if not audio_file.is_file():
+            missing += 1
+            continue
+        size = audio_file.stat().st_size
+        if size == 0 or size < MIN_AUDIO_BYTES:
+            empty += 1
+            continue
+        valid += 1
+
+    return {
+        "assigned": assigned,
+        "validAudio": valid,
+        "missing": missing,
+        "empty": empty,
+        "extra": 0,
+        "duplicates": 0,
+    }
+
+
 def filter_unrated(
     rater_id: str, task_id: str, assignments: list, schema: dict
 ) -> list:
@@ -597,12 +645,14 @@ def list_rater_tasks(
         json_path = JSON_DIR / f"{task_id}.json"
         if not json_path.is_file():
             continue
-        audio_dir = AUDIO_DIR / task_id
-        summary = validate_submission(json_path, audio_dir)
-        task_ids, _ = load_task_ids(json_path)
+        with json_path.open(encoding="utf-8") as f:
+            assignments = json.load(f)
+        rateable = filter_rateable_assignments(assignments)
+        rateable_ids = [entry["sentenceId"] for entry in rateable]
+        summary = summarize_rateable(task_id, rateable)
         ratings = load_ratings(rater_id, task_id)
-        rating_progress = count_rating_progress(ratings, task_ids, schema)
-        has_submissions = audio_dir.is_dir() and any(audio_dir.glob(f"*{AUDIO_EXT}"))
+        rating_progress = count_rating_progress(ratings, rateable_ids, schema)
+        has_submissions = summary["validAudio"] > 0
 
         tasks.append(
             {
@@ -642,10 +692,11 @@ def get_rater_task(
     with json_path.open(encoding="utf-8") as f:
         assignments = json.load(f)
 
+    rateable = filter_rateable_assignments(assignments)
     filtered_assignments = (
-        filter_unrated(rater_id, task_id, assignments, schema)
+        filter_unrated(rater_id, task_id, rateable, schema)
         if unrated_only
-        else assignments
+        else rateable
     )
     total = len(filtered_assignments)
     start = (page - 1) * page_size
